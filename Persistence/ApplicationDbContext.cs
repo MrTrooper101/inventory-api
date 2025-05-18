@@ -11,5 +11,6 @@ namespace inventory_api.Persistence
         }
 
         public DbSet<User> Users { get; set; }
+        public DbSet<Product> Products { get; set; }
     }
 }

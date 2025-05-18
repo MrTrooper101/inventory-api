@@ -22,10 +22,12 @@ namespace inventory_api.Application.Features.Auth.Handlers
         {
             var dto = request.SetPasswordDto;
 
+            var decodedToken = Uri.UnescapeDataString(dto.Token);
+
             if (dto.Password != dto.ConfirmPassword)
                 throw new Exception("Passwords do not match.");
 
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.EmailConfirmationToken == dto.Token, cancellationToken);
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.EmailConfirmationToken == decodedToken, cancellationToken);
 
             if (user == null)   
                 throw new Exception("Invalid or expired token.");

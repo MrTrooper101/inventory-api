@@ -26,6 +26,18 @@ builder.Services.AddFluentMigratorCore()
         .ScanIn(Assembly.GetExecutingAssembly()).For.Migrations())
     .AddLogging(lb => lb.AddFluentMigratorConsole());
 
+// Add CORS services
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowSpecificOrigin",
+        builder =>
+        {
+            builder.WithOrigins("http://example.com", "http://localhost:5173")
+                   .AllowAnyHeader()
+                   .AllowAnyMethod();
+        });
+});
+
 // Add controllers
 builder.Services.AddControllers();
 
@@ -56,6 +68,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 app.UseRouting();
+app.UseCors("AllowSpecificOrigin");
 app.UseAuthorization();
 app.MapControllers();
 

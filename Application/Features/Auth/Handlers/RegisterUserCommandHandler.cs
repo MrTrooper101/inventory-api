@@ -6,6 +6,7 @@ using inventory_api.Infastructure.Email;
 using inventory_api.Persistence;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Cryptography;
 
 namespace inventory_api.Application.Features.Auth.Handlers
 {
@@ -14,24 +15,42 @@ namespace inventory_api.Application.Features.Auth.Handlers
         private readonly ApplicationDbContext _context;
         private readonly IMapper _mapper;
         private readonly IEmailService _emailService;
+        private readonly IConfiguration _configuration;
 
-        public RegisterUserCommandHandler(ApplicationDbContext context, IMapper mapper, IEmailService emailService)
+        public RegisterUserCommandHandler(ApplicationDbContext context, IMapper mapper, IEmailService emailService, IConfiguration configuration)
         {
             _context = context;
             _mapper = mapper;
             _emailService = emailService;
+            _configuration = configuration;
         }
 
         public async Task<RegisterUserResponseDto> Handle(RegisterUserCommand request, CancellationToken cancellationToken)
         {
-            var existingUser = await _context.Users.FirstOrDefaultAsync(u => u.Email == request.RegisterUserDto.Email, cancellationToken);
+            var email = request.RegisterUserDto.Email;
+            var existingUser = await _context.Users.FirstOrDefaultAsync(u => u.Email == email, cancellationToken);
 
             if (existingUser != null)
             {
-                throw new Exception("User with this email already exists.");
+                if (existingUser.IsEmailConfirmed)
+                {
+                    throw new Exception("User with this email already exists and is verified.");
+                }
+
+                var newToken = GenerateSecureToken();
+                existingUser.EmailConfirmationToken = newToken;
+                // existingUser.EmailConfirmationTokenExpiry = DateTime.UtcNow.AddHours(24);
+
+                await _context.SaveChangesAsync(cancellationToken);
+
+                await SendVerificationEmail(existingUser.Email, newToken, cancellationToken);
+
+                return _mapper.Map<RegisterUserResponseDto>(existingUser);
             }
 
-            var user = new User
+            var token = GenerateSecureToken();
+
+            var newUser = new User
             {
                 Email = request.RegisterUserDto.Email,
                 FirstName = request.RegisterUserDto.FirstName,
@@ -40,17 +59,37 @@ namespace inventory_api.Application.Features.Auth.Handlers
                 ContactNumber = request.RegisterUserDto.ContactNumber,
                 CompanyName = request.RegisterUserDto.CompanyName,
                 CompanyAddress = request.RegisterUserDto.CompanyAddress,
+                EmailConfirmationToken = token,
+                // EmailConfirmationTokenExpiry = DateTime.UtcNow.AddHours(24)
             };
 
-            _context.Users.Add(user);
+            _context.Users.Add(newUser);
             await _context.SaveChangesAsync(cancellationToken);
 
-            await _emailService.SendEmailAsync(user.Email,
-                "Verify your email",
-                $"Please verify your email by clicking here: " +
-                $"https://yourfrontend.com/verify-email?token={user.EmailConfirmationToken}", cancellationToken);
+            await SendVerificationEmail(newUser.Email, token, cancellationToken);
 
-            return _mapper.Map<RegisterUserResponseDto>(user);
+            return _mapper.Map<RegisterUserResponseDto>(newUser);
         }
+
+        private static string GenerateSecureToken()
+        {
+            return Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
+        }
+
+        private async Task SendVerificationEmail(string email, string token, CancellationToken cancellationToken)
+        {
+            var encodedToken = Uri.EscapeDataString(token);
+            var baseUrl = _configuration["Frontend:BaseUrl"];
+            var verificationLink = $"{baseUrl}/set-password?token={encodedToken}";
+            var subject = "Verify your email";
+            var body = $@"
+                <p>Please verify your email by clicking the link below:</p>
+                <p><a href=""{verificationLink}"">Verify Email</a></p>
+                <p>If you didn’t request this, please ignore this email.</p>
+            ";
+
+            await _emailService.SendEmailAsync(email, subject, body, cancellationToken);
+        }
+
     }
 }
